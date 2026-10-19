@@ -19,13 +19,13 @@ CLIENT_SECRET = os.getenv("CTRADER_CLIENT_SECRET", "eEgvRhPB8FZGzj7TML0wSYpCcsfl
 REDIRECT_URI = os.getenv("CTRADER_REDIRECT_URI", "https://timedge-render.onrender.com/auth/callback").strip()
 ENV = "live" if os.getenv("CTRADER_ENV", "demo").strip().lower() == "live" else "demo"
 SYMBOL = os.getenv("CTRADER_SYMBOL", "XAUUSD").strip() or "XAUUSD"
-ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN", "l___YLyr-1HBpaI38uok5j3jC3AZWh2te_GaliFFG1w").strip()
-REFRESH_TOKEN = os.getenv("CTRADER_REFRESH_TOKEN", "HkaIzIw8Rt8v02E6BPoQT2FIW0iqsaisYYX3Qcty_vk").strip()
+ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN", "").strip()
+REFRESH_TOKEN = os.getenv("CTRADER_REFRESH_TOKEN", "69ls3RzY15XyTC9AzoQGkKqKgkz0u1H6o6--R22yHOE").strip()
 # This is the user's configured account ID, but it is only used if it appears in the
 # authorized account list returned by cTrader for the current access token.
 ACCOUNT_ID = os.getenv("CTRADER_ACCOUNT_ID", "10143677").strip()
 try:
-    TOKEN_EXPIRES_AT = int(os.getenv("CTRADER_ACCESS_TOKEN_EXPIRES_AT", "2628000") or "0")
+    TOKEN_EXPIRES_AT = int(os.getenv("CTRADER_ACCESS_TOKEN_EXPIRES_AT", "0") or "0")
 except ValueError:
     TOKEN_EXPIRES_AT = 0
 
