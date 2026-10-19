@@ -8,15 +8,15 @@ from aiohttp import web, ClientSession, WSMsgType, ClientWebSocketResponse
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.getenv('PORT', '10000'))
-CLIENT_ID = os.getenv('CTRADER_CLIENT_ID', '').strip()
-CLIENT_SECRET = os.getenv('CTRADER_CLIENT_SECRET', '').strip()
-REDIRECT_URI = os.getenv('CTRADER_REDIRECT_URI', '').strip()
+CLIENT_ID = os.getenv('CTRADER_CLIENT_ID', '43370_XnVtFKCM1AkBJKWzgwDJQvqM1MBViHWo076zWdjfCf8Je1fsgE').strip()
+CLIENT_SECRET = os.getenv('CTRADER_CLIENT_SECRET', 'eEgvRhPB8FZGzj7TML0wSYpCcsflXxp0apMpi9JbjFKACLIzBC').strip()
+REDIRECT_URI = os.getenv('CTRADER_REDIRECT_URI', 'https://timedge-render.onrender.com/auth/callback').strip()
 ENV = 'live' if os.getenv('CTRADER_ENV', 'demo').lower() == 'live' else 'demo'
 SYMBOL = os.getenv('CTRADER_SYMBOL', 'XAUUSD').strip()
-ACCESS_TOKEN = os.getenv('CTRADER_ACCESS_TOKEN', '').strip()
-REFRESH_TOKEN = os.getenv('CTRADER_REFRESH_TOKEN', '').strip()
-ACCOUNT_ID = os.getenv('CTRADER_ACCOUNT_ID', '').strip()
-TOKEN_EXPIRES_AT = os.getenv('CTRADER_ACCESS_TOKEN_EXPIRES_AT', '').strip()
+ACCESS_TOKEN = os.getenv('CTRADER_ACCESS_TOKEN', 'e0o8NVNSg6fLDsYwEm67K88OzCF95YuZaEEAFb49OPg').strip()
+REFRESH_TOKEN = os.getenv('CTRADER_REFRESH_TOKEN', '5S3PHlZkXf1cjfygDiA5oaf4gK8Jy8KMnIthqIjiqGg').strip()
+ACCOUNT_ID = os.getenv('CTRADER_ACCOUNT_ID', '10143677').strip()
+TOKEN_EXPIRES_AT = os.getenv('CTRADER_ACCESS_TOKEN_EXPIRES_AT', '2628000').strip()
 
 BOOT = time.time()
 FEEDS = {
