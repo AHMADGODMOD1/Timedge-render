@@ -13,8 +13,8 @@ CLIENT_SECRET = os.getenv('CTRADER_CLIENT_SECRET', 'eEgvRhPB8FZGzj7TML0wSYpCcsfl
 REDIRECT_URI = os.getenv('CTRADER_REDIRECT_URI', 'https://timedge-render.onrender.com/auth/callback').strip()
 ENV = 'live' if os.getenv('CTRADER_ENV', 'demo').lower() == 'live' else 'demo'
 SYMBOL = os.getenv('CTRADER_SYMBOL', 'XAUUSD').strip()
-ACCESS_TOKEN = os.getenv('CTRADER_ACCESS_TOKEN', 'e0o8NVNSg6fLDsYwEm67K88OzCF95YuZaEEAFb49OPg').strip()
-REFRESH_TOKEN = os.getenv('CTRADER_REFRESH_TOKEN', '5S3PHlZkXf1cjfygDiA5oaf4gK8Jy8KMnIthqIjiqGg').strip()
+ACCESS_TOKEN = os.getenv('CTRADER_ACCESS_TOKEN', 'l___YLyr-1HBpaI38uok5j3jC3AZWh2te_GaliFFG1w').strip()
+REFRESH_TOKEN = os.getenv('CTRADER_REFRESH_TOKEN', 'HkaIzIw8Rt8v02E6BPoQT2FIW0iqsaisYYX3Qcty_vk').strip()
 ACCOUNT_ID = os.getenv('CTRADER_ACCOUNT_ID', '10143677').strip()
 TOKEN_EXPIRES_AT = os.getenv('CTRADER_ACCESS_TOKEN_EXPIRES_AT', '2628000').strip()
 
