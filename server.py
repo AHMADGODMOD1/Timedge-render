@@ -14,13 +14,13 @@ from aiohttp import web, ClientSession, WSMsgType
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.getenv("PORT", "10000"))
-CLIENT_ID = os.getenv("CTRADER_CLIENT_ID", "43370_XnVtFKCM1AkBJKWzgwDJQvqM1MBViHWo076zWdjfCf8Je1fsgE").strip()
-CLIENT_SECRET = os.getenv("CTRADER_CLIENT_SECRET", "eEgvRhPB8FZGzj7TML0wSYpCcsflXxp0apMpi9JbjFKACLIzBC").strip()
+CLIENT_ID = os.getenv("CTRADER_CLIENT_ID", "").strip()
+CLIENT_SECRET = os.getenv("CTRADER_CLIENT_SECRET", "").strip()
 REDIRECT_URI = os.getenv("CTRADER_REDIRECT_URI", "https://timedge-render.onrender.com/auth/callback").strip()
 ENV = "live" if os.getenv("CTRADER_ENV", "demo").strip().lower() == "live" else "demo"
 SYMBOL = os.getenv("CTRADER_SYMBOL", "XAUUSD").strip() or "XAUUSD"
-ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN", "O5H5KPy7xOoExTyWhoE4HxaEDiyzxqhoAmuBdsm_Gfs").strip()
-REFRESH_TOKEN = os.getenv("CTRADER_REFRESH_TOKEN", "91hVNcjJxMr1vPtNt1CA51TpVuBHlTkSdbneD35SnuY").strip()
+ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN", "").strip()
+REFRESH_TOKEN = os.getenv("CTRADER_REFRESH_TOKEN", "").strip()
 # This is the user's configured account ID, but it is only used if it appears in the
 # authorized account list returned by cTrader for the current access token.
 ACCOUNT_ID = os.getenv("CTRADER_ACCOUNT_ID", "10143677").strip()
@@ -247,7 +247,6 @@ def start_ctrader_worker():
                 ProtoOASpotEvent, ProtoOAErrorRes,
                 ProtoOAGetTrendbarsReq, ProtoOAGetTrendbarsRes,
             )
-            from ctrader_open_api.messages.OpenApiMessages_pb2 import ProtoOATrendbarPeriod
             from ctrader_open_api.messages.OpenApiCommonMessages_pb2 import ProtoHeartbeatEvent
             from twisted.internet import reactor
 
@@ -347,7 +346,9 @@ def start_ctrader_worker():
                             history = ProtoOAGetTrendbarsReq()
                             history.ctidTraderAccountId = state["account_id"]
                             history.symbolId = state["symbol_id"]
-                            history.period = ProtoOATrendbarPeriod.M1
+                            # ProtoOA trendbar period M1 is enum value 1 in the Open API schema.
+                            # Some ctrader-open-api releases do not export the enum symbol in generated Python modules.
+                            history.period = 1
                             history.fromTimestamp = now_ms() - 3 * 86400000
                             history.toTimestamp = now_ms()
                             state["history_requested"] = True
