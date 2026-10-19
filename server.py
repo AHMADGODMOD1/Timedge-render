@@ -7,8 +7,7 @@ pip install aiohttp ctrader-open-api service_identity
 Render Start Command:
 python server.py
 
-Keep all credentials in Render Environment Variables.
-Never hard-code credentials or tokens in this file.
+Credentials belong in Render Environment Variables, never in source code.
 """
 
 import asyncio
@@ -16,42 +15,31 @@ import json
 import os
 import threading
 import time
-from urllib.parse import urlencode
 
 from aiohttp import web, ClientSession, WSMsgType
-
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.getenv("PORT", "10000"))
 
-# Set these in Render -> Environment.
 CLIENT_ID = os.getenv("CTRADER_CLIENT_ID", "43370_XnVtFKCM1AkBJKWzgwDJQvqM1MBViHWo076zWdjfCf8Je1fsgE").strip()
 CLIENT_SECRET = os.getenv("CTRADER_CLIENT_SECRET", "eEgvRhPB8FZGzj7TML0wSYpCcsflXxp0apMpi9JbjFKACLIzBC").strip()
-REDIRECT_URI = os.getenv(
-    "CTRADER_REDIRECT_URI",
-    "https://timedge-render.onrender.com/auth/callback",
-).strip()
-
-ENV = (
-    "live"
-    if os.getenv("CTRADER_ENV", "demo").strip().lower() == "live"
-    else "demo"
-)
+ENV = "live" if os.getenv("CTRADER_ENV", "demo").strip().lower() == "live" else "demo"
 SYMBOL = os.getenv("CTRADER_SYMBOL", "XAUUSD").strip() or "XAUUSD"
 
-ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN", "").strip()
-REFRESH_TOKEN = os.getenv("CTRADER_REFRESH_TOKEN", "").strip()
-ACCOUNT_ID = os.getenv("CTRADER_ACCOUNT_ID", "69ls3RzY15XyTC9AzoQGkKqKgkz0u1H6o6--R22yHOE").strip()
+ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN", "O5H5KPy7xOoExTyWhoE4HxaEDiyzxqhoAmuBdsm_Gfs").strip()
+REFRESH_TOKEN = os.getenv("CTRADER_REFRESH_TOKEN", "91hVNcjJxMr1vPtNt1CA51TpVuBHlTkSdbneD35SnuY").strip()
+ACCOUNT_ID = os.getenv("CTRADER_ACCOUNT_ID", "10143677").strip()
 
 try:
-    TOKEN_EXPIRES_AT = int(
-        os.getenv("CTRADER_ACCESS_TOKEN_EXPIRES_AT", "0") or "0"
-    )
+    TOKEN_EXPIRES_AT = int(os.getenv("CTRADER_ACCESS_TOKEN_EXPIRES_AT", "0") or "0")
 except ValueError:
     TOKEN_EXPIRES_AT = 0
 
-
 BOOT = time.time()
+LOOP = None
+CLIENTS = set()
+CTRADE_CLIENT = None
+CTRADE_THREAD = None
 
 FEEDS = {
     "ctrader": {
@@ -86,47 +74,33 @@ FEEDS = {
     },
 }
 
-CLIENTS = set()
-LOOP = None
-CTRADE_CLIENT = None
-CTRADE_THREAD = None
-
 
 def now_ms():
     return int(time.time() * 1000)
 
 
-def set_feed(name, **kwargs):
-    FEEDS[name].update(kwargs)
-    FEEDS[name]["updatedAt"] = now_ms()
-
-    if LOOP and LOOP.is_running():
-        try:
-            asyncio.run_coroutine_threadsafe(
-                broadcast(
-                    {
-                        "type": "feed",
-                        "feed": name,
-                        "data": FEEDS[name],
-                    }
-                ),
-                LOOP,
-            )
-        except Exception:
-            pass
-
-
 async def broadcast(payload):
     dead = []
-
     for ws in tuple(CLIENTS):
         try:
             await ws.send_json(payload)
         except Exception:
             dead.append(ws)
-
     for ws in dead:
         CLIENTS.discard(ws)
+
+
+def set_feed(name, **kwargs):
+    FEEDS[name].update(kwargs)
+    FEEDS[name]["updatedAt"] = now_ms()
+    if LOOP and LOOP.is_running():
+        try:
+            asyncio.run_coroutine_threadsafe(
+                broadcast({"type": "feed", "feed": name, "data": FEEDS[name]}),
+                LOOP,
+            )
+        except Exception:
+            pass
 
 
 def public_state():
@@ -135,9 +109,7 @@ def public_state():
         "service": "GexFlow Python market gateway",
         "uptimeSeconds": int(time.time() - BOOT),
         "feeds": FEEDS,
-        "ctraderConfigured": bool(
-            CLIENT_ID and CLIENT_SECRET and REDIRECT_URI
-        ),
+        "ctraderConfigured": bool(CLIENT_ID and CLIENT_SECRET and ACCESS_TOKEN),
         "ctraderEnvironment": ENV,
         "note": "Prices are live only when feed status is LIVE.",
     }
@@ -145,25 +117,18 @@ def public_state():
 
 async def home(req):
     path = os.path.join(ROOT, "index.html")
-
     if not os.path.isfile(path):
-        return web.Response(
-            text="index.html not found beside server.py",
-            status=404,
-        )
-
+        return web.Response(text="index.html not found beside server.py", status=404)
     return web.FileResponse(path)
 
 
 async def health(req):
-    return web.json_response(
-        {
-            "ok": True,
-            "backend": "python",
-            "feeds": {k: v["status"] for k, v in FEEDS.items()},
-            "uptimeSeconds": int(time.time() - BOOT),
-        }
-    )
+    return web.json_response({
+        "ok": True,
+        "backend": "python",
+        "feeds": {k: v["status"] for k, v in FEEDS.items()},
+        "uptimeSeconds": int(time.time() - BOOT),
+    })
 
 
 async def api_markets(req):
@@ -172,62 +137,38 @@ async def api_markets(req):
 
 async def api_quote(req):
     name = req.query.get("source", "ctrader").lower()
-
     if name not in FEEDS:
         return web.json_response(
-            {
-                "ok": False,
-                "error": "source must be ctrader, binance, or bybit",
-            },
+            {"ok": False, "error": "source must be ctrader, binance, or bybit"},
             status=400,
         )
-
     quote = FEEDS[name]
-
-    return web.json_response(
-        quote,
-        status=200 if quote.get("status") == "LIVE" else 503,
-    )
+    return web.json_response(quote, status=200 if quote["status"] == "LIVE" else 503)
 
 
-async def auth_login(req):
-    if not (CLIENT_ID and CLIENT_SECRET and REDIRECT_URI):
-        return web.Response(
-            text=(
-                "Set CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, "
-                "and CTRADER_REDIRECT_URI in Render Environment."
-            ),
-            status=500,
-        )
+async def ws_handler(req):
+    ws = web.WebSocketResponse(heartbeat=25, max_msg_size=32768)
+    await ws.prepare(req)
+    CLIENTS.add(ws)
+    await ws.send_json({"type": "snapshot", "state": public_state()})
 
-    query = urlencode(
-        {
-            "client_id": CLIENT_ID,
-            "redirect_uri": REDIRECT_URI,
-            "scope": "accounts",
-            "product": "web",
-        }
-    )
+    async for msg in ws:
+        if msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
+            break
 
-    raise web.HTTPFound(
-        "https://id.ctrader.com/my/settings/openapi/grantingaccess/?"
-        + query
-    )
+    CLIENTS.discard(ws)
+    return ws
 
 
-async def refresh_oauth_tokens(session, force=False):
-    """Refresh an expiring access token and retain the rotated refresh token."""
+async def refresh_tokens(session, force=False):
+    """Refresh existing credentials when needed; do not log token values."""
     global ACCESS_TOKEN, REFRESH_TOKEN, TOKEN_EXPIRES_AT
 
-    token_is_expiring = (
-        TOKEN_EXPIRES_AT > 0
-        and TOKEN_EXPIRES_AT <= int(time.time()) + 120
-    )
-
+    expiring = TOKEN_EXPIRES_AT > 0 and TOKEN_EXPIRES_AT <= int(time.time()) + 120
     if not REFRESH_TOKEN:
         return bool(ACCESS_TOKEN)
 
-    if not (force or not ACCESS_TOKEN or token_is_expiring):
+    if not (force or not ACCESS_TOKEN or expiring):
         return bool(ACCESS_TOKEN)
 
     params = {
@@ -243,258 +184,73 @@ async def refresh_oauth_tokens(session, force=False):
         timeout=20,
     ) as response:
         data = await response.json(content_type=None)
-
         if response.status >= 400 or not data.get("accessToken"):
-            reason = (
-                data.get("description")
-                or data.get("errorCode")
-                or f"Token refresh HTTP {response.status}"
-            )
+            reason = data.get("description") or data.get("errorCode") or f"Token refresh HTTP {response.status}"
             raise RuntimeError(str(reason)[:180])
 
     ACCESS_TOKEN = data["accessToken"]
     REFRESH_TOKEN = data.get("refreshToken") or REFRESH_TOKEN
     TOKEN_EXPIRES_AT = int(time.time()) + int(data.get("expiresIn", 0))
 
-    print("[cTrader] OAuth token refreshed.", flush=True)
+    # A rotated refresh token is retained in memory only.
+    # Update Render's CTRADER_REFRESH_TOKEN if cTrader rotates it.
+    print("[cTrader] Token refresh succeeded.", flush=True)
     return True
-
-
-async def auth_callback(req):
-    global ACCESS_TOKEN, REFRESH_TOKEN, TOKEN_EXPIRES_AT
-
-    code = req.query.get("code", "")
-
-    if not code:
-        error = (
-            req.query.get("error_description")
-            or req.query.get("error")
-        )
-
-        return web.Response(
-            text=(
-                "cTrader authorization did not return a code. "
-                + str(error or "Start at /auth/login.")
-            ),
-            status=400,
-        )
-
-    params = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": REDIRECT_URI,
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-    }
-
-    try:
-        async with ClientSession() as session:
-            async with session.get(
-                "https://openapi.ctrader.com/apps/token",
-                params=params,
-                timeout=20,
-            ) as response:
-                data = await response.json(content_type=None)
-
-                if response.status >= 400 or not data.get("accessToken"):
-                    reason = (
-                        data.get("description")
-                        or data.get("errorCode")
-                        or f"OAuth HTTP {response.status}"
-                    )
-                    raise RuntimeError(str(reason)[:180])
-
-        ACCESS_TOKEN = data["accessToken"]
-        REFRESH_TOKEN = data.get("refreshToken") or REFRESH_TOKEN
-        TOKEN_EXPIRES_AT = int(time.time()) + int(
-            data.get("expiresIn", 0)
-        )
-
-        set_feed(
-            "ctrader",
-            status="TOKEN_RECEIVED",
-            error="OAuth token received; resolving authorized accounts.",
-        )
-
-        start_ctrader_worker()
-
-        return web.Response(
-            text=(
-                "<h2>GexFlow: cTrader authorization received</h2>"
-                "<p>Account discovery has started. Check "
-                "<a href='/api/markets'>/api/markets</a> "
-                "and the Render logs/feed status.</p>"
-            ),
-            content_type="text/html",
-        )
-
-    except Exception as exc:
-        set_feed(
-            "ctrader",
-            status="ERROR",
-            error=("OAuth: " + str(exc))[:220],
-        )
-
-        return web.Response(
-            text="cTrader OAuth failed: " + str(exc)[:220],
-            status=500,
-        )
-
-
-async def ws_handler(req):
-    ws = web.WebSocketResponse(
-        heartbeat=25,
-        max_msg_size=32768,
-    )
-
-    await ws.prepare(req)
-    CLIENTS.add(ws)
-
-    await ws.send_json(
-        {
-            "type": "snapshot",
-            "state": public_state(),
-        }
-    )
-
-    async for msg in ws:
-        if msg.type in (
-            WSMsgType.CLOSE,
-            WSMsgType.CLOSED,
-            WSMsgType.ERROR,
-        ):
-            break
-
-    CLIENTS.discard(ws)
-    return ws
 
 
 async def binance_feed(app):
     url = "wss://fstream.binance.com/ws/btcusdt@bookTicker"
-
     while True:
         try:
             set_feed("binance", status="CONNECTING", error=None)
-
-            async with app["session"].ws_connect(
-                url,
-                heartbeat=25,
-                timeout=20,
-            ) as ws:
+            async with app["session"].ws_connect(url, heartbeat=25, timeout=20) as ws:
                 async for message in ws:
                     if message.type == WSMsgType.TEXT:
                         data = json.loads(message.data)
-                        bid = float(data["b"])
-                        ask = float(data["a"])
-
+                        bid, ask = float(data["b"]), float(data["a"])
                         if bid > 0 and ask >= bid:
                             set_feed(
-                                "binance",
-                                status="LIVE",
-                                bid=bid,
-                                ask=ask,
-                                price=(bid + ask) / 2,
-                                timestamp=now_ms(),
-                                error=None,
+                                "binance", status="LIVE", bid=bid, ask=ask,
+                                price=(bid + ask) / 2, timestamp=now_ms(), error=None,
                             )
-
-                    elif message.type in (
-                        WSMsgType.CLOSED,
-                        WSMsgType.ERROR,
-                    ):
+                    elif message.type in (WSMsgType.CLOSED, WSMsgType.ERROR):
                         break
-
-            set_feed(
-                "binance",
-                status="RECONNECTING",
-                error="Binance WebSocket closed; reconnecting.",
-            )
-
         except asyncio.CancelledError:
             raise
-
         except Exception as exc:
-            set_feed(
-                "binance",
-                status="RECONNECTING",
-                error=str(exc)[:180],
-            )
-
+            set_feed("binance", status="RECONNECTING", error=str(exc)[:180])
         await asyncio.sleep(3)
 
 
 async def bybit_feed(app):
     url = "wss://stream.bybit.com/v5/public/linear"
-
     while True:
         try:
             set_feed("bybit", status="CONNECTING", error=None)
-
-            async with app["session"].ws_connect(
-                url,
-                heartbeat=20,
-                timeout=20,
-            ) as ws:
-                await ws.send_json(
-                    {
-                        "op": "subscribe",
-                        "args": ["orderbook.1.BTCUSDT"],
-                    }
-                )
-
+            async with app["session"].ws_connect(url, heartbeat=20, timeout=20) as ws:
+                await ws.send_json({"op": "subscribe", "args": ["orderbook.1.BTCUSDT"]})
                 async for message in ws:
                     if message.type == WSMsgType.TEXT:
                         data = json.loads(message.data)
-
-                        if (
-                            data.get("topic", "").startswith("orderbook.1.")
-                            and data.get("data")
-                        ):
+                        if data.get("topic", "").startswith("orderbook.1.") and data.get("data"):
                             book = data["data"]
-                            bids = book.get("b", [])
-                            asks = book.get("a", [])
-
+                            bids, asks = book.get("b", []), book.get("a", [])
                             if bids and asks:
-                                bid = float(bids[0][0])
-                                ask = float(asks[0][0])
-
+                                bid, ask = float(bids[0][0]), float(asks[0][0])
                                 if bid > 0 and ask >= bid:
                                     set_feed(
-                                        "bybit",
-                                        status="LIVE",
-                                        bid=bid,
-                                        ask=ask,
-                                        price=(bid + ask) / 2,
-                                        timestamp=now_ms(),
-                                        error=None,
+                                        "bybit", status="LIVE", bid=bid, ask=ask,
+                                        price=(bid + ask) / 2, timestamp=now_ms(), error=None,
                                     )
-
-                    elif message.type in (
-                        WSMsgType.CLOSED,
-                        WSMsgType.ERROR,
-                    ):
+                    elif message.type in (WSMsgType.CLOSED, WSMsgType.ERROR):
                         break
-
-            set_feed(
-                "bybit",
-                status="RECONNECTING",
-                error="Bybit WebSocket closed; reconnecting.",
-            )
-
         except asyncio.CancelledError:
             raise
-
         except Exception as exc:
-            set_feed(
-                "bybit",
-                status="RECONNECTING",
-                error=str(exc)[:180],
-            )
-
+            set_feed("bybit", status="RECONNECTING", error=str(exc)[:180])
         await asyncio.sleep(3)
 
 
-# cTrader SDK runs its Twisted reactor in a dedicated thread.
 def start_ctrader_worker():
     global CTRADE_CLIENT, CTRADE_THREAD
 
@@ -503,22 +259,15 @@ def start_ctrader_worker():
 
     if not (CLIENT_ID and CLIENT_SECRET and ACCESS_TOKEN):
         set_feed(
-            "ctrader",
-            status="AUTH_REQUIRED",
-            error="Open /auth/login and grant access to your cTrader account.",
+            "ctrader", status="CONFIG_REQUIRED",
+            error="Set CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET and CTRADER_ACCESS_TOKEN in Render.",
         )
         return
 
     def runner():
         global CTRADE_CLIENT
-
         try:
-            from ctrader_open_api import (
-                Client,
-                Protobuf,
-                TcpProtocol,
-                EndPoints,
-            )
+            from ctrader_open_api import Client, Protobuf, TcpProtocol, EndPoints
             from ctrader_open_api.messages.OpenApiMessages_pb2 import (
                 ProtoOAApplicationAuthReq,
                 ProtoOAApplicationAuthRes,
@@ -533,451 +282,222 @@ def start_ctrader_worker():
                 ProtoOASpotEvent,
                 ProtoOAErrorRes,
             )
-            from ctrader_open_api.messages.OpenApiCommonMessages_pb2 import (
-                ProtoHeartbeatEvent,
-            )
+            from ctrader_open_api.messages.OpenApiCommonMessages_pb2 import ProtoHeartbeatEvent
             from twisted.internet import reactor
 
-            host = (
-                EndPoints.PROTOBUF_LIVE_HOST
-                if ENV == "live"
-                else EndPoints.PROTOBUF_DEMO_HOST
-            )
-
-            client = Client(
-                host,
-                EndPoints.PROTOBUF_PORT,
-                TcpProtocol,
-            )
-
+            host = EndPoints.PROTOBUF_LIVE_HOST if ENV == "live" else EndPoints.PROTOBUF_DEMO_HOST
+            client = Client(host, EndPoints.PROTOBUF_PORT, TcpProtocol)
             CTRADE_CLIENT = client
+            state = {"account_id": None, "symbol_id": None, "digits": 2}
 
-            state = {
-                "account_id": None,
-                "symbol_id": None,
-                "digits": 2,
-            }
-
-            # IMPORTANT: this function aligns with runner() indentation.
             def send(request):
                 name = request.__class__.__name__
-                print(f"[cTrader] Sending: {name}", flush=True)
+                deferred = client.send(request, responseTimeoutInSeconds=15)
 
-                deferred = client.send(
-                    request,
-                    responseTimeoutInSeconds=15,
-                )
-
-                def on_success(response):
-                    print(f"[cTrader] Response: {name}", flush=True)
-                    return response
-
-                def on_failure(failure):
-                    message = failure.getErrorMessage()
-
-                    print(
-                        f"[cTrader] FAILED: {name}: {message}",
-                        flush=True,
-                    )
-
-                    set_feed(
-                        "ctrader",
-                        status="ERROR",
-                        error=f"{name}: {message}"[:220],
-                    )
-
+                def failed(failure):
+                    msg = failure.getErrorMessage() if hasattr(failure, "getErrorMessage") else str(failure)
+                    set_feed("ctrader", status="ERROR", error=f"{name}: {msg}"[:220])
+                    print(f"[cTrader] {name} failed: {msg[:180]}", flush=True)
                     return None
 
-                deferred.addCallbacks(on_success, on_failure)
+                deferred.addErrback(failed)
                 return deferred
 
-            def on_error(failure):
-                try:
-                    message = (
-                        failure.getErrorMessage()
-                        if hasattr(failure, "getErrorMessage")
-                        else str(failure)
-                    )
-                except Exception:
-                    message = str(failure)
-
-                set_feed(
-                    "ctrader",
-                    status="ERROR",
-                    error=("cTrader request failed: " + message)[:220],
-                )
-
-                return failure
-
             def heartbeat():
-                if not getattr(reactor, "running", False):
-                    return
+                if getattr(reactor, "running", False):
+                    try:
+                        client.send(ProtoHeartbeatEvent())
+                    except Exception:
+                        pass
+                    reactor.callLater(10, heartbeat)
 
-                try:
-                    request = ProtoHeartbeatEvent()
-                    client.send(request).addErrback(on_error)
-                except Exception as exc:
-                    set_feed(
-                        "ctrader",
-                        status="RECONNECTING",
-                        error=("Heartbeat: " + str(exc))[:180],
-                    )
-
+            def connected(_client):
+                set_feed("ctrader", status="CONNECTED", error=None)
+                req = ProtoOAApplicationAuthReq()
+                req.clientId = CLIENT_ID
+                req.clientSecret = CLIENT_SECRET
+                send(req)
                 reactor.callLater(10, heartbeat)
 
-            def connected(c):
-                set_feed(
-                    "ctrader",
-                    status="CONNECTED",
-                    error=None,
-                )
+            def disconnected(_client, reason):
+                set_feed("ctrader", status="RECONNECTING", error=("Disconnected: " + str(reason))[:180])
 
-                request = ProtoOAApplicationAuthReq()
-                request.clientId = CLIENT_ID
-                request.clientSecret = CLIENT_SECRET
-                send(request)
-
-                reactor.callLater(10, heartbeat)
-
-            def disconnected(c, reason):
-                set_feed(
-                    "ctrader",
-                    status="RECONNECTING",
-                    error=("cTrader disconnected: " + str(reason))[:180],
-                )
-
-            def received(c, message):
+            def received(_client, message):
                 try:
                     payload = message.payloadType
 
                     if payload == ProtoOAApplicationAuthRes().payloadType:
-                        set_feed(
-                            "ctrader",
-                            status="APP_AUTHENTICATED",
-                            error=None,
-                        )
+                        set_feed("ctrader", status="APP_AUTHENTICATED", error=None)
+                        req = ProtoOAGetAccountListByAccessTokenReq()
+                        req.accessToken = ACCESS_TOKEN
+                        send(req)
 
-                        request = ProtoOAGetAccountListByAccessTokenReq()
-                        request.accessToken = ACCESS_TOKEN
-                        send(request)
-
-                    elif (
-                        payload
-                        == ProtoOAGetAccountListByAccessTokenRes().payloadType
-                    ):
+                    elif payload == ProtoOAGetAccountListByAccessTokenRes().payloadType:
                         response = Protobuf.extract(message)
                         accounts = list(response.ctidTraderAccount)
-
                         if not accounts:
                             set_feed(
-                                "ctrader",
-                                status="NO_AUTHORIZED_ACCOUNTS",
-                                error=(
-                                    "No accounts returned for this token. "
-                                    "Re-authorize at /auth/login and grant access."
-                                ),
+                                "ctrader", status="NO_AUTHORIZED_ACCOUNTS",
+                                error="This access token returned no authorized accounts. Check token and demo/live environment.",
                             )
                             return
 
-                        ids = [
-                            int(account.ctidTraderAccountId)
-                            for account in accounts
-                        ]
+                        ids = [int(a.ctidTraderAccountId) for a in accounts]
+                        configured = int(ACCOUNT_ID) if ACCOUNT_ID.isdigit() else None
 
-                        configured = (
-                            int(ACCOUNT_ID)
-                            if ACCOUNT_ID.isdigit()
-                            else None
-                        )
-
-                        if configured is not None and configured in ids:
+                        if configured is not None:
+                            if configured not in ids:
+                                set_feed(
+                                    "ctrader", status="ACCOUNT_ID_MISMATCH",
+                                    error="CTRADER_ACCOUNT_ID is not in the accounts authorized by this token: " + ", ".join(map(str, ids[:15])),
+                                )
+                                return
                             selected = configured
                         elif len(ids) == 1:
                             selected = ids[0]
                         else:
                             set_feed(
-                                "ctrader",
-                                status="ACCOUNT_SELECTION_REQUIRED",
-                                error=(
-                                    "Set CTRADER_ACCOUNT_ID in Render to one "
-                                    "of the authorized account IDs: "
-                                    + ", ".join(map(str, ids[:20]))
-                                ),
+                                "ctrader", status="ACCOUNT_SELECTION_REQUIRED",
+                                error="Set CTRADER_ACCOUNT_ID to one of these authorized numeric IDs: " + ", ".join(map(str, ids[:15])),
                             )
                             return
 
                         state["account_id"] = selected
-
-                        request = ProtoOAAccountAuthReq()
-                        request.ctidTraderAccountId = selected
-                        request.accessToken = ACCESS_TOKEN
-                        send(request)
+                        req = ProtoOAAccountAuthReq()
+                        req.ctidTraderAccountId = selected
+                        req.accessToken = ACCESS_TOKEN
+                        send(req)
 
                     elif payload == ProtoOAAccountAuthRes().payloadType:
                         response = Protobuf.extract(message)
-
-                        confirmed = int(
-                            getattr(
-                                response,
-                                "ctidTraderAccountId",
-                                state["account_id"] or 0,
-                            )
-                        )
-
+                        confirmed = int(getattr(response, "ctidTraderAccountId", state["account_id"] or 0))
                         state["account_id"] = confirmed
-
-                        set_feed(
-                            "ctrader",
-                            status="ACCOUNT_AUTHENTICATED",
-                            error=None,
-                        )
-
-                        request = ProtoOASymbolsListReq()
-                        request.ctidTraderAccountId = confirmed
-                        send(request)
+                        set_feed("ctrader", status="ACCOUNT_AUTHENTICATED", error=None)
+                        req = ProtoOASymbolsListReq()
+                        req.ctidTraderAccountId = confirmed
+                        send(req)
 
                     elif payload == ProtoOASymbolsListRes().payloadType:
                         response = Protobuf.extract(message)
-
-                        wanted = (
-                            SYMBOL.upper()
-                            .replace("/", "")
-                            .replace(".", "")
-                            .replace("_", "")
-                        )
-
+                        wanted = SYMBOL.upper().replace("/", "").replace(".", "").replace("_", "")
                         found = None
 
-                        for symbol in response.symbol:
-                            name = (
-                                getattr(symbol, "symbolName", "")
-                                .upper()
-                                .replace("/", "")
-                                .replace(".", "")
-                                .replace("_", "")
-                            )
-
-                            if name == wanted or (
-                                wanted in ("XAUUSD", "GOLD")
-                                and name in ("XAUUSD", "GOLD")
-                            ):
-                                found = symbol
+                        for item in response.symbol:
+                            name = getattr(item, "symbolName", "").upper().replace("/", "").replace(".", "").replace("_", "")
+                            if name == wanted or (wanted in ("XAUUSD", "GOLD") and name in ("XAUUSD", "GOLD")):
+                                found = item
                                 break
 
                         if not found:
                             names = [
                                 getattr(item, "symbolName", "")
                                 for item in response.symbol
-                                if any(
-                                    term in getattr(item, "symbolName", "").upper()
-                                    for term in ("XAU", "GOLD")
-                                )
+                                if any(x in getattr(item, "symbolName", "").upper() for x in ("XAU", "GOLD"))
                             ]
-
                             set_feed(
-                                "ctrader",
-                                status="SYMBOL_NOT_FOUND",
-                                error=(
-                                    "Requested "
-                                    + SYMBOL
-                                    + " not found. Gold symbols: "
-                                    + (", ".join(names[:15]) or "none returned")
-                                ),
+                                "ctrader", status="SYMBOL_NOT_FOUND",
+                                error="Gold symbol not found. Available matches: " + (", ".join(names[:15]) or "none"),
                             )
                             return
 
                         state["symbol_id"] = int(found.symbolId)
-
                         try:
                             state["digits"] = int(found.digits)
                         except Exception:
                             state["digits"] = 2
 
-                        request = ProtoOASubscribeSpotsReq()
-                        request.ctidTraderAccountId = state["account_id"]
-                        request.symbolId.append(state["symbol_id"])
-                        request.subscribeToSpotTimestamp = True
-
-                        send(request)
-
-                        set_feed(
-                            "ctrader",
-                            status="SUBSCRIBING",
-                            error=None,
-                        )
+                        req = ProtoOASubscribeSpotsReq()
+                        req.ctidTraderAccountId = state["account_id"]
+                        req.symbolId.append(state["symbol_id"])
+                        req.subscribeToSpotTimestamp = True
+                        send(req)
+                        set_feed("ctrader", status="SUBSCRIBING", error=None)
 
                     elif payload == ProtoOASubscribeSpotsRes().payloadType:
-                        set_feed(
-                            "ctrader",
-                            status="LIVE_WAITING_FOR_TICK",
-                            error=None,
-                        )
+                        set_feed("ctrader", status="LIVE_WAITING_FOR_TICK", error=None)
 
                     elif payload == ProtoOAErrorRes().payloadType:
-                        error = Protobuf.extract(message)
-                        description = getattr(
-                            error,
-                            "description",
-                            "cTrader API error",
-                        )
-                        code = getattr(error, "errorCode", "")
-
-                        set_feed(
-                            "ctrader",
-                            status="ERROR",
-                            error=(
-                                str(code) + ": " + str(description)
-                            ).strip(": ")[:220],
-                        )
+                        err = Protobuf.extract(message)
+                        code = getattr(err, "errorCode", "")
+                        desc = getattr(err, "description", "cTrader API error")
+                        set_feed("ctrader", status="ERROR", error=f"{code}: {desc}".strip(": ")[:220])
 
                     elif payload == ProtoOASpotEvent().payloadType:
                         event = Protobuf.extract(message)
-
-                        if (
-                            state["symbol_id"]
-                            and int(event.symbolId) == state["symbol_id"]
-                        ):
-                            # cTrader spot prices use a 1e5 scaling factor.
-                            bid = (
-                                float(event.bid) / 100000.0
-                                if event.HasField("bid")
-                                else None
-                            )
-                            ask = (
-                                float(event.ask) / 100000.0
-                                if event.HasField("ask")
-                                else None
-                            )
+                        if state["symbol_id"] and int(event.symbolId) == state["symbol_id"]:
+                            # cTrader spot prices are scaled by 100000.
+                            bid = float(event.bid) / 100000.0 if event.HasField("bid") else None
+                            ask = float(event.ask) / 100000.0 if event.HasField("ask") else None
 
                             old = FEEDS["ctrader"]
-
-                            bid = (
-                                bid
-                                if bid and bid > 0
-                                else old.get("bid")
-                            )
-                            ask = (
-                                ask
-                                if ask and ask > 0
-                                else old.get("ask")
-                            )
+                            bid = bid if bid and bid > 0 else old.get("bid")
+                            ask = ask if ask and ask > 0 else old.get("ask")
 
                             if bid and ask and bid > 0 and ask >= bid:
                                 set_feed(
-                                    "ctrader",
-                                    status="LIVE",
-                                    bid=bid,
-                                    ask=ask,
-                                    price=(bid + ask) / 2,
-                                    timestamp=now_ms(),
-                                    error=None,
+                                    "ctrader", status="LIVE", bid=bid, ask=ask,
+                                    price=(bid + ask) / 2, timestamp=now_ms(), error=None,
                                 )
-
                 except Exception as exc:
-                    set_feed(
-                        "ctrader",
-                        status="ERROR",
-                        error=("Message handling: " + str(exc))[:220],
-                    )
+                    set_feed("ctrader", status="ERROR", error=("Message handling: " + str(exc))[:220])
 
             client.setConnectedCallback(connected)
             client.setDisconnectedCallback(disconnected)
             client.setMessageReceivedCallback(received)
-
             client.startService()
             reactor.run(installSignalHandlers=False)
 
         except Exception as exc:
-            set_feed(
-                "ctrader",
-                status="ERROR",
-                error=("cTrader worker: " + str(exc))[:220],
-            )
+            set_feed("ctrader", status="ERROR", error=("cTrader worker: " + str(exc))[:220])
+            print("[cTrader] Worker error: " + str(exc)[:180], flush=True)
 
-            print(
-                "[cTrader] Worker failed: " + str(exc)[:220],
-                flush=True,
-            )
-
-    CTRADE_THREAD = threading.Thread(
-        target=runner,
-        name="ctrader-openapi",
-        daemon=True,
-    )
+    CTRADE_THREAD = threading.Thread(target=runner, name="ctrader-openapi", daemon=True)
     CTRADE_THREAD.start()
 
 
 async def startup(app):
     global LOOP
-
     LOOP = asyncio.get_running_loop()
     app["session"] = ClientSession()
-
     app["tasks"] = [
         asyncio.create_task(binance_feed(app)),
         asyncio.create_task(bybit_feed(app)),
     ]
 
-    if CLIENT_ID and CLIENT_SECRET and REFRESH_TOKEN:
-        try:
-            await refresh_oauth_tokens(app["session"])
-        except Exception as exc:
-            set_feed(
-                "ctrader",
-                status="TOKEN_REFRESH_FAILED",
-                error=str(exc)[:200],
-            )
-
-    if ACCESS_TOKEN and CLIENT_ID and CLIENT_SECRET:
-        start_ctrader_worker()
-    elif CLIENT_ID and CLIENT_SECRET and REDIRECT_URI:
-        set_feed(
-            "ctrader",
-            status="AUTH_REQUIRED",
-            error="Open /auth/login and grant access to the intended cTrader account.",
-        )
+    if not (CLIENT_ID and CLIENT_SECRET):
+        set_feed("ctrader", status="CONFIG_REQUIRED", error="Set CTRADER_CLIENT_ID and CTRADER_CLIENT_SECRET.")
+    elif not ACCESS_TOKEN and not REFRESH_TOKEN:
+        set_feed("ctrader", status="TOKEN_REQUIRED", error="Set CTRADER_ACCESS_TOKEN or CTRADER_REFRESH_TOKEN in Render.")
     else:
-        set_feed(
-            "ctrader",
-            status="CONFIG_REQUIRED",
-            error="Configure cTrader credentials in Render Environment.",
-        )
+        if REFRESH_TOKEN:
+            try:
+                await refresh_tokens(app["session"])
+            except Exception as exc:
+                set_feed("ctrader", status="TOKEN_REFRESH_FAILED", error=str(exc)[:200])
 
-    print(
-        "GexFlow Python service started; feeds are connecting. "
-        "No credentials are logged.",
-        flush=True,
-    )
+        if ACCESS_TOKEN:
+            start_ctrader_worker()
+        else:
+            set_feed("ctrader", status="TOKEN_REQUIRED", error="No usable access token. Check the Render token environment variables.")
+
+    print("GexFlow started. No credentials are logged.", flush=True)
 
 
 async def cleanup(app):
     for task in app.get("tasks", []):
         task.cancel()
-
     if app.get("tasks"):
-        await asyncio.gather(
-            *app["tasks"],
-            return_exceptions=True,
-        )
-
+        await asyncio.gather(*app["tasks"], return_exceptions=True)
     await app["session"].close()
 
 
 app = web.Application(client_max_size=16384)
-
 app.router.add_get("/", home)
 app.router.add_get("/health", health)
 app.router.add_get("/api/markets", api_markets)
 app.router.add_get("/api/quote", api_quote)
-app.router.add_get("/auth/login", auth_login)
-app.router.add_get("/auth/callback", auth_callback)
 app.router.add_get("/ws", ws_handler)
-
 app.on_startup.append(startup)
 app.on_cleanup.append(cleanup)
 
-web.run_app(
-    app,
-    host="0.0.0.0",
-    port=PORT,
-)
+web.run_app(app, host="0.0.0.0", port=PORT)
