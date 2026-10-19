@@ -189,7 +189,7 @@ def start_ctrader_worker():
                                     set_feed('ctrader',status='LIVE',bid=bid,ask=ask,price=(bid+ask)/2,timestamp=now_ms(),error=None)
                 except Exception as e: set_feed('ctrader',status='ERROR',error=('Message handling: '+str(e))[:200])
             client.setConnectedCallback(connected); client.setDisconnectedCallback(disconnected)
-            client.setMessageReceivedCallback(received); client.setMessageErrorCallback(on_error)
+            client.setMessageReceivedCallback(received)
             client.startService(); reactor.run(installSignalHandlers=False)
         except Exception as e:
             set_feed('ctrader',status='ERROR',error=('cTrader worker: '+str(e))[:220])
