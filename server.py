@@ -242,30 +242,30 @@ def start_ctrader_worker():
             state = {"account_id": None, "symbol_id": None, "digits": 2, "last_heartbeat": 0}
 
            def send(request):
-    name = request.__class__.__name__
-    print(f"[cTrader] Sending: {name}", flush=True)
+               name = request.__class__.__name__
+               print(f"[cTrader] Sending: {name}", flush=True)
 
-    deferred = client.send(
-        request,
-        responseTimeoutInSeconds=15
-    )
+               deferred = client.send(
+                   request,
+                   responseTimeoutInSeconds=15
+               )
 
-    def on_success(response):
-        print(f"[cTrader] Response: {name}", flush=True)
-        return response
+               def on_success(response):
+                   print(f"[cTrader] Response: {name}", flush=True)
+                   return response
 
-    def on_failure(failure):
-        message = failure.getErrorMessage()
-        print(f"[cTrader] FAILED: {name}: {message}", flush=True)
-        set_feed(
-            "ctrader",
-            status="ERROR",
-            error=f"{name}: {message}"[:220]
-        )
-        return None
+               def on_failure(failure):
+                   message = failure.getErrorMessage()
+                   print(f"[cTrader] FAILED: {name}: {message}", flush=True)
+                   set_feed(
+                       "ctrader",
+                       status="ERROR",
+                       error=f"{name}: {message}"[:220]
+                   )
+                   return None
 
-    deferred.addCallbacks(on_success, on_failure)
-    return deferred
+               deferred.addCallbacks(on_success, on_failure)
+               return deferred
 
             def on_error(failure):
                 try:
